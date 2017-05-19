@@ -70,6 +70,18 @@ if(nargin < 4)
     init = 0;
 end
 
+%% room params
+% Room is size Lx2L
+
+% let L1 = room.x and L2 = room.y
+% could do symbolic, but we need actual numbers to feed back into the estimator.
+% should distance be an absolute number, or some fraction of L1 and L2? 
+% syms('L1', 'L2') ; 
+
+% for now, assume room is 10x20 meters
+L1 = 10 ; 
+L2 = 20 ; 
+
 %% Mode 1: Initialization
 % Set number of particles:
 N = 10; % obviously, you will need more particles than 10.
@@ -81,6 +93,13 @@ if (init)
     postParticles.x = zeros(2,N);
     postParticles.y = zeros(2,N);
     postParticles.h = zeros(2,N);
+    
+    % randomly distribute the initial estimates. 
+    % postparticles is a 2xN matrix (2 robots x N samples).
+    postParticles.x = rand([2,N])*L1; % rand[0,1]*room.x = random distribution across x dimension of room
+    postParticles.y = rand([2,N])*L2; % similar for y dimension of room
+    postParticles.h = rand([2,N])*2*pi ; % random heading in interval [0, 2pi]
+    
     % and leave the function
     return;
 end % end init
@@ -94,6 +113,9 @@ end % end init
 postParticles.x = zeros(2,N);
 postParticles.y = zeros(2,N);
 postParticles.h = zeros(2,N);
+
+
+
 
 end % end estimator
 
