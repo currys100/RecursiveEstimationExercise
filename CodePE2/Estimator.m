@@ -78,9 +78,9 @@ end
 % should distance be an absolute number, or some fraction of L1 and L2? 
 % syms('L1', 'L2') ; 
 
-% for now, assume room is 10x20 meters
-L1 = 10 ; 
-L2 = 20 ; 
+% for now, assume room is 20x10 meters 
+Ly = 10 ; 
+Lx = 2*Ly ;
 
 %% Mode 1: Initialization
 % Set number of particles:
@@ -96,8 +96,8 @@ if (init)
     
     % randomly distribute the initial estimates. 
     % postparticles is a 2xN matrix (2 robots x N samples).
-    postParticles.x = rand([2,N])*L1; % rand[0,1]*room.x = random distribution across x dimension of room
-    postParticles.y = rand([2,N])*L2; % similar for y dimension of room
+    postParticles.x = rand([2,N])*Lx; % rand[0,1]*room.x = random distribution across x dimension of room
+    postParticles.y = rand([2,N])*Ly; % similar for y dimension of room
     postParticles.h = rand([2,N])*2*pi ; % random heading in interval [0, 2pi]
     
     % and leave the function
@@ -109,8 +109,29 @@ end % end init
 
 % Implement your estimator here!
 
-% Replace the following:
-postParticles.x = zeros(2,N);
+%% get sensor measurement
+% S1 (lower right) and S2 (upper right) measure distances to robotA
+% S3 (upper left) and S4 (lower left) measure distances to robotB
+
+% determine distance to robotA: 
+thetaA = arccos((sens(2)^2 - sens(1)^2 - Ly^2) / (-2*sens(1)*Ly)) ; % law of cosines
+
+robotA.x = cos(pi/2 - thetaA) ;
+robotA.y = sin(pi/2 - thetaA) ;
+
+% determine distance to robotB: 
+thetaB = arccos((sens(3)^2 - sens(4)^2 - Ly^2) / (2*sens(4)*Ly)) ; % law of cosines
+
+robotB.x = cos(pi/2 - thetaB) ;
+robotB.y = sin(pi/2 - thetaB) ;
+%% resample. determine weights of particles 
+
+
+%% propogate system model
+
+
+% return postParticles
+postParticles.x = zeros(2,N); % = x_{k-1} + vel_x * Ts (plus noise)
 postParticles.y = zeros(2,N);
 postParticles.h = zeros(2,N);
 
