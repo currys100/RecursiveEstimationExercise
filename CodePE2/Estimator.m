@@ -90,9 +90,9 @@ if (init)
     % These particles are the posterior particles at discrete time k = 0
     % which will be fed into your estimator again at k = 1
     % Replace the following:
-    postParticles.x = zeros(2,N);
-    postParticles.y = zeros(2,N);
-    postParticles.h = zeros(2,N);
+%     postParticles.x = zeros(2,N);
+%     postParticles.y = zeros(2,N);
+%     postParticles.h = zeros(2,N);
     
     % randomly distribute the initial estimates. 
     % postparticles is a 2xN matrix (2 robots x N samples).
@@ -109,33 +109,142 @@ end % end init
 
 % Implement your estimator here!
 
-%% get sensor measurement
-% S1 (lower right) and S2 (upper right) measure distances to robotA
-% S3 (upper left) and S4 (lower left) measure distances to robotB
+%% Step 1: Prior Update
 
-% determine distance to robotA: 
-thetaA = arccos((sens(2)^2 - sens(1)^2 - Ly^2) / (-2*sens(1)*Ly)) ; % law of cosines
+% Generate PDF of Process Noise and get N samples: 
+vbar = KC.vbar; 
+lower = -vbar ;
+peak = 0 ;
+upper = vbar ;
+% PDF of process noise 
+x_noise_pdf = makedist('Triangular','a',lower,'b',peak,'c',upper) ;  
+% N values from pdf for robots A and B: 
+x_noise_val.A = random(x_noise_pdf, 1, N) ; 
+x_noise_val.B = random(x_noise_pdf, 1, N) ;
 
-robotA.x = cos(pi/2 - thetaA) ;
-robotA.y = sin(pi/2 - thetaA) ;
+% velocity.A, velocity.B are a 2xN matrices of x,y velocities for robots A and B 
+velocity.A = [act(1,1)*cos(prevPostParticles.h(1,:)) .* (1 + x_noise_val.A); 
+    act(1,1)*sin(prevPostParticles.h(1,:)) .* (1 + x_noise_val.A) ] ; 
+velocity.B = [act(2,1)*cos(prevPostParticles.h(2,:)) .* (1 + x_noise_val.B); 
+    act(2,1)*sin(prevPostParticles.h(2,:)) .* (1 + x_noise_val.B) ] ; 
 
-% determine distance to robotB: 
-thetaB = arccos((sens(3)^2 - sens(4)^2 - Ly^2) / (2*sens(4)*Ly)) ; % law of cosines
-
-robotB.x = cos(pi/2 - thetaB) ;
-robotB.y = sin(pi/2 - thetaB) ;
-%% resample. determine weights of particles 
-
-
-%% propogate system model
+% prior updates for x,y position coordinates of robots A and B.
+% KC.ts=timestep 
+x_p_update.x(1,:) = prevPostParticles.x(1,:) + velocity.A(1,:)*KC.ts ; 
+x_p_update.x(2,:) = prevPostParticles.x(2,:) + velocity.A(2,:)*KC.ts ;
+x_p_update.y(1,:) = prevPostParticles.y(1,:) + velocity.B(1,:)*KC.ts ;
+x_p_update.y(2,:) = prevPostParticles.y(2,:) + velocity.B(2,:)*KC.ts ;
 
 
-% return postParticles
-postParticles.x = zeros(2,N); % = x_{k-1} + vel_x * Ts (plus noise)
+%% prior update heading 
+
+x_p_update.h = prevPostParticles.h ;
+
+%% if measurement = inf, there is no measurement for this iteration 
+
+%% Generate PDF of Sensor Noise and get N samples: 
+
+wbar = KC.wbar; 
+lower = -wbar ;
+peak = 0 ;
+upper = wbar ;
+% PDF of process noise 
+z_noise_pdf = makedist('Triangular','a',lower,'b',peak,'c',upper) ;  
+
+%% determine weights of particles 
+
+% calculate distance from sensor to robot, based on x_p_update estimate. 
+% distance is a 2xN matrix containing distances to each sensor 
+distance.s1 = sqrt((Lx-x_p_update.x).^2 + x_p_update.y.^2 ) ;
+distance.s2 = sqrt((Lx-x_p_update.x).^2 + (Ly-x_p_update.y).^2 ) ;
+distance.s3 = sqrt(x_p_update.x.^2 + (Ly-x_p_update.y).^2 ) ;
+distance.s4 = sqrt(x_p_update.x.^2 + x_p_update.y.^2 ) ; 
+
+% difference between z_meas and the distance (calculated from the prior) = z_noise.
+% determine noise for each sensor to each robot just in case we detect the
+% wrong robot.
+z_noise.s1.A = abs(sens(1,1) - distance.s1(1,:)) ; % s1 to A 
+z_noise.s1.B = abs(sens(1,1) - distance.s1(2,:)) ; % s1 to B 
+z_noise.s2.A = abs(sens(2,1) - distance.s2(1,:)) ; % s2 to A
+z_noise.s2.B = abs(sens(2,1) - distance.s2(2,:)) ; % s2 to B
+z_noise.s3.A = abs(sens(3,1) - distance.s3(1,:)) ; % s3 to A   
+z_noise.s3.B = abs(sens(3,1) - distance.s3(2,:)) ; % s3 to B
+z_noise.s4.A = abs(sens(4,1) - distance.s4(1,:)) ; % s4 to A
+z_noise.s4.B = abs(sens(4,1) - distance.s4(2,:)) ; % s4 to B
+
+% the probability of a sensor measurement with this noise is: 
+% robot A to s1 and s2
+f_z_given_xs.s1.sbar0 = pdf(z_noise_pdf, z_noise.s1.A ) ; 
+f_z_given_xs.s1.sbar1 = pdf(z_noise_pdf, z_noise.s1.B ) ; 
+f_z_given_xs.s2.sbar0 = pdf(z_noise_pdf, z_noise.s2.A ) ; 
+f_z_given_xs.s2.sbar1 = pdf(z_noise_pdf, z_noise.s2.B ) ; 
+% robot B to s3 and s4
+f_z_given_xs.s3.sbar0 = pdf(z_noise_pdf, z_noise.s3.B ) ; 
+f_z_given_xs.s3.sbar1 = pdf(z_noise_pdf, z_noise.s3.A ) ; 
+f_z_given_xs.s4.sbar0 = pdf(z_noise_pdf, z_noise.s4.B ) ; 
+f_z_given_xs.s4.sbar1 = pdf(z_noise_pdf, z_noise.s4.A ) ; 
+
+% apply Total Probability Theorem to find f_z_given_x for each sensor
+f_z_given_x.s1 = f_z_given_xs.s1.sbar0*KC.sbar + f_z_given_xs.s1.sbar1*(1-KC.sbar) ; 
+f_z_given_x.s2 = f_z_given_xs.s2.sbar0*KC.sbar + f_z_given_xs.s2.sbar1*(1-KC.sbar) ; 
+f_z_given_x.s3 = f_z_given_xs.s3.sbar0*KC.sbar + f_z_given_xs.s3.sbar1*(1-KC.sbar) ; 
+f_z_given_x.s4 = f_z_given_xs.s4.sbar0*KC.sbar + f_z_given_xs.s4.sbar1*(1-KC.sbar) ; 
+
+% Unnormalized Liklihood
+f_x_prior.A = pdf(x_noise_pdf, x_noise_val.A)  % probability of x_noise 
+f_x_prior.B = pdf(x_noise_pdf, x_noise_val.B)  % probability of x_noise 
+
+% liklihood of the state of robot A = f(s1)*f(s2)
+z_weights.A = (f_x_prior.A .* f_z_given_x.s1) .* (f_x_prior.A .* f_z_given_x.s2) 
+% liklihood of the state of robot A = f(s3)*f(s4)
+z_weights.B = (f_x_prior.B .* f_z_given_x.s3) .* (f_x_prior.B .* f_z_given_x.s4)  
+
+% Normalized Liklihood
+sum(z_weights.A)
+sum(z_weights.B)
+z_weights.A = z_weights.A / sum(z_weights.A)  
+z_weights.B = z_weights.B / sum(z_weights.B)  
+
+%% Resample: find the particle corresponding to the r bin
+
+postParticles.x = zeros(2,N); 
 postParticles.y = zeros(2,N);
 postParticles.h = zeros(2,N);
 
+for j=1:N
+    % choose a random r between 0 and 1
+    r = rand() ;
+    
+    % determine which particle falls into the r bin by satisfying 2 tests
+    for p=1:N
+        
+        test1A = sum(z_weights.A(1:p)) >= r ;
+        test2A = sum(z_weights.A(1:p-1)) < r ;
+        test1B = sum(z_weights.B(1:p)) >= r ;
+        test2B = sum(z_weights.B(1:p-1)) < r ;
+        
+        if test1A && test2A
+            postParticles.x(1,j) = x_p_update.x(1,p)  ;
+            postParticles.y(1,j) = x_p_update.y(1,p)  ;
+            postParticles.h(1,j) = x_p_update.h(1,p)  ;
+        end
+        
+        if test1B && test2B
+            postParticles.x(2,j) = x_p_update.x(2,p) ;
+            postParticles.y(2,j) = x_p_update.y(2,p) ;
+            postParticles.h(2,j) = x_p_update.h(2,p) ;
+        end
+        
+    end
+    
+end
 
+%% Roughening 
+
+
+% max(postParticles.x(1,:) )
+% max(postParticles.y(1,:)) 
+% max(postParticles.h(1,:)) 
 
 
 end % end estimator
