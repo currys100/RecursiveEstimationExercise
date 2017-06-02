@@ -71,20 +71,15 @@ if(nargin < 4)
 end
 
 %% room params
-% Room is size Lx2L
+% Room is size Lx2L, where L is a known constant set by KC.L
 
-% let L1 = room.x and L2 = room.y
-% could do symbolic, but we need actual numbers to feed back into the estimator.
-% should distance be an absolute number, or some fraction of L1 and L2?
-% syms('L1', 'L2') ;
-
-% for now, assume room is 20x10 meters
-Ly = 10 ;
+Ly = KC.L ;
 Lx = 2*Ly ;
 
 %% Mode 1: Initialization
+% TO DO: how to tune the number of particles?
 % Set number of particles:
-N = 60; % obviously, you will need more particles than 10.
+N = 200; % obviously, you will need more particles than 10.
 if (init)
     % Do the initialization of your estimator here!
     % These particles are the posterior particles at discrete time k = 0
@@ -97,10 +92,12 @@ if (init)
     % randomly distribute the initial estimates.
     % postparticles is a 2xN matrix (2 robots x N samples).
     
-    postParticles.x = [ones(2,N/4)*Lx ones(2,N/4)*Lx zeros(2,N/4) zeros(2,N/4)] ;  
+    postParticles.x = [ones(2,N/4)*Lx ones(2,N/4)*Lx zeros(2,N/4) zeros(2,N/4)] ;
     postParticles.y = [zeros(2,N/4) ones(2,N/4)*Ly ones(2,N/4)*Ly zeros(2,N/4)] ;
     % make sure robots init headings point into the room
-    postParticles.h = [ pi/2+rand([2,N/4])*pi/2 pi+rand([2,N/4])*pi/2 pi*3/2+rand([2,N/4])*pi/2 rand([2,N/4])*pi/2 ] ; 
+    % TO DO: handle case where N/4 is not an integer.
+%     postParticles.h = [ pi/2+rand([2,N/4])*pi/2 pi+rand([2,N/4])*pi/2 pi*3/2+rand([2,N/4])*pi/2 rand([2,N/4])*pi/2 ] ;
+    postParticles.h = rand(2,N)*2*pi ; 
     
     % and leave the function
     return;
@@ -139,10 +136,36 @@ x_p_update.y(2,:) = prevPostParticles.y(2,:) + velocity.B(2,:)*KC.ts ;
 
 
 %% prior update heading
+% if we hit a wall, the new angle is  the ideal reflected angle + noise
 
+% TO DO: how to make a pdf from a known distribution c*vj^2 ??
+% making f_vj a uniform distribution for now.
+vj_pdf = makedist('Uniform', 'lower', -1, 'upper', 1) ;
+
+% check if we've hit a wall:
+hit.A.north = x_p_update.y(1,:) > Ly ;
+hit.B.north = x_p_update.y(2,:) > Ly ;
+hit.A.south = x_p_update.y(1,:) < 0 ;
+hit.B.south = x_p_update.y(2,:) < 0 ;
+hit.A.east = x_p_update.x(1,:) > Lx ;
+hit.B.east = x_p_update.x(2,:) > Lx ;
+hit.A.west = x_p_update.x(1,:) < 0 ;
+hit.B.west = x_p_update.x(2,:) < 0 ;
+
+% update heading with additional noise when we hit walls; else stay the
+% same.
 x_p_update.h = prevPostParticles.h ;
-
-%% if measurement = inf, there is no measurement for this iteration
+for p=1:N
+    if hit.A.north(1,p) || hit.A.south(1,p) || hit.A.east(1,p) || hit.A.west(1,p)
+        x_p_update.h(1,p) = pi - prevPostParticles.h(1,p) + rand()*pi/3-pi/6 ; % TO DO: use actual vj distribution
+%         disp('x,y A')
+%         x_p_update.x(1,p), x_p_update.y(1,p)
+    elseif hit.B.north(1,p) || hit.B.south(1,p) || hit.B.east(1,p) || hit.B.west(1,p)
+        x_p_update.h(2,p) = pi - prevPostParticles.h(2,p) + rand()*pi/3-pi/6  ; % TO DO: use actual vj distribution
+%         disp('x,y B')
+%         x_p_update.x(2,p), x_p_update.y(2,p)
+    end
+end
 
 %% Generate PDF of Sensor Noise and get N samples:
 
@@ -193,11 +216,12 @@ f_z_given_x.s2 = f_z_given_xs.s2.sbar0*KC.sbar + f_z_given_xs.s2.sbar1*(1-KC.sba
 f_z_given_x.s3 = f_z_given_xs.s3.sbar0*KC.sbar + f_z_given_xs.s3.sbar1*(1-KC.sbar) ;
 f_z_given_x.s4 = f_z_given_xs.s4.sbar0*KC.sbar + f_z_given_xs.s4.sbar1*(1-KC.sbar) ;
 
-% Unnormalized Liklihood
+% Unnormalized likelihood
 f_x_prior.A = pdf(x_noise_pdf, x_noise_val.A) ; % probability of x_noise
 f_x_prior.B = pdf(x_noise_pdf, x_noise_val.B) ; % probability of x_noise
 
-% liklihood of the state of robot A = f(s1)*f(s2)
+% if measurement = inf, there is no measurement for this iteration
+% likelihood of the state of robot A = f(s1)*f(s2)
 if ~isinf(sens(1)) && ~isinf(sens(2))
     z_weights.A = (f_x_prior.A .* f_z_given_x.s1) .* (f_x_prior.A .* f_z_given_x.s2) ;
 elseif ~isinf(sens(1)) && isinf(sens(2))
@@ -209,8 +233,8 @@ elseif isinf(sens(1)) && isinf(sens(2))
 end
 
 
-% liklihood of the state of robot B = f(s3)*f(s4)
-% TO DO: come back to this! 
+% likelihood of the state of robot B = f(s3)*f(s4)
+% TO DO: come back to this!
 if ~isinf(sens(3)) && ~isinf(sens(4))
     z_weights.B = (f_x_prior.B .* f_z_given_x.s3) .* (f_x_prior.B .* f_z_given_x.s4) ;
 elseif ~isinf(sens(3)) && isinf(sens(4))
@@ -221,7 +245,7 @@ elseif isinf(sens(3)) && isinf(sens(4))
     z_weights.B = ones([1,N]) ;
 end
 
-% Normalized Liklihood
+% Normalized likelihood
 sum(z_weights.A) ;
 sum(z_weights.B) ;
 z_weights.A = z_weights.A / sum(z_weights.A) ;
@@ -262,11 +286,6 @@ for j=1:N
     
     
     %% Roughening
-    
-    
-    % max(postParticles.x(1,:) )
-    % max(postParticles.y(1,:))
-    % max(postParticles.h(1,:))
     
     
 end % end estimator
