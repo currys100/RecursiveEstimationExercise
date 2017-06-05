@@ -64,16 +64,21 @@ function [posEst,oriEst,driftEst, posVar,oriVar,driftVar,estState] = Estimator(e
 
 %% Mode 1: Initialization
 if (tm == 0)
-    % Do the initialization of your estimator here!
-    
+    % Do the initialization of your estimator here!    
     % Replace the following:
-    posEst = [0,0];
-    oriEst = 0;
+    posEst = [estConst.TranslationStartBound*rand(),estConst.TranslationStartBound*rand()];
+    oriEst = estConst.RotationStartBound*rand();
     driftEst = 0;
-    posVar = [0 0];
-    oriVar = 0;
-    driftVar = 0;
-
+    posVar = [(estConst.TranslationStartBound^2)/3 (estConst.TranslationStartBound^2)/3];
+    oriVar = (estConst.RotationStartBound^2)/3;
+    driftVar = 0;%Q_b;
+    estState.posEst = posEst;
+    estState.oriEst = oriEst;
+    estState.driftEst = driftEst;
+    estState.posVar = posVar;
+    estState.oriVar = oriVar;
+    estState.driftVar = driftVar;
+    estState.P = diag([oriVar,posVar,driftVar],0);
     return;
 end
 
@@ -81,14 +86,161 @@ end
 %% Mode 2: Estimator iteration.
 % If we get this far tm is not equal to zero, and we are no longer
 % initializing.  Run the estimator.
+W = estConst.WheelRadius;
+B = estConst.WheelBase;
+u_v = actuate(1);
+u_r = actuate(2);
+Q_v = estConst.VelocityInputPSD;
+Q_b = estConst.GyroDriftPSD;
+sig_r = estConst.CompassNoise;
+sig_g = estConst.GyroNoise;
+sig_d = estConst.DistNoise;
+z_c = sense(2);
+z_g = sense(3);
+z_d = sense(1);
+% Step1
+    S_t = W*u_v*cos(u_r);
 
+    function A = A_mat(ori_Est)
+        A = [0,                   0, 0, 0;...
+            -S_t*sin(ori_Est),    0, 0, 0;...
+            S_t*cos(ori_Est),     0, 0, 0;...
+            0,                    0, 0, 0];
+    end
+
+    function L = L_mat(ori_Est)
+        L = ...
+[-(W/B)*u_v*sin(u_r) 0;...
+            S_t*cos(ori_Est),                                          0;...
+            S_t*sin(ori_Est),                                          0;...
+            0,                                                         1];
+    end
+
+
+    function P_ode = odefunc(t,P_)
+        P = convertVecToMatrix(P_(5:20,1));
+        P_ode(1,1) = -(W/B)*u_v*sin(u_r);
+        P_ode(2,1) = S_t*cos(P_(1,1));
+        P_ode(3,1) = S_t*sin(P_(1,1));
+        P_ode(4,1) = 0;%sqrt(Q_b)*randn();
+        A = A_mat(P_(1,1));
+        L = L_mat(P_(1,1));
+        P_ode(5:20,1) = convertMatrixToVec(A*P + P*A' +L*[Q_v, 0;0, Q_b]*L');
+    end
+
+% Solving the ode
+tspan = [0, 0.1];
+P_0 = convertMatrixToVec(estState.P);
+x_0 = [estState.oriEst,estState.posEst,estState.driftEst]';
+P_p_vec = ode45(@(t,P) odefunc(t,P), tspan, [x_0;P_0]);
+P_p = convertVecToMatrix(P_p_vec.y(5:20,end));
+x_p = P_p_vec.y(1:4,end);
+
+
+estState.oriEst = x_p(1,1);
+estState.posEst = [x_p(2,1), x_p(3,1)];
+estState.driftEst = x_p(4,1);
+
+% Step 2
+% if (isinf(z_c))&&(isinf(z_g))&&(isinf(z_d))
+%     x_m = x_p;
+%     P_m = P_p;
+% end
+% if (isinf(z_c)==0)&&(isinf(z_g)==0)&&(isinf(z_d))
+%     H = [1, 0, 0, 0; 1, 0, 0, 1];
+%     M = eye(2);
+%     R = diag([sig_r,sig_g],0);
+%     K_k = P_p*H'/(H*P_p*H' + M*R*M');
+%     x_m = x_p + K_k*([z_c,z_g]' - [estState.oriEst; estState.oriEst + estState.driftEst]);
+%     P_m = (eye(4) - K_k*H)*P_p;
+% end
+% if (isinf(z_c)==0)&&(isinf(z_g))&&(isinf(z_d)==0)
+%     H = [1, 0, 0, 0; 0, estState.posEst(1)/(sqrt(estState.posEst*estState.posEst')), estState.posEst(2)/(sqrt(estState.posEst*estState.posEst')), 0];
+%     M = eye(2);
+%     R = diag([sig_r,sig_d],0);
+%     K_k = P_p*H'/(H*P_p*H' + M*R*M');
+%     x_m = x_p + K_k*([z_c,z_d]' - [estState.oriEst; sqrt(estState.posEst*estState.posEst')]);
+%     P_m = (eye(4) - K_k*H)*P_p;
+% end
+% if (isinf(z_c))&&(isinf(z_g)==0)&&(isinf(z_d)==0)
+%     H = [ 1, 0, 0, 1; 0, estState.posEst(1)/(sqrt(estState.posEst*estState.posEst')), estState.posEst(2)/(sqrt(estState.posEst*estState.posEst')), 0];
+%     M = eye(2);
+%     R = diag([sig_g,sig_d],0);
+%     K_k = P_p*H'/(H*P_p*H' + M*R*M');
+%     vect = ([z_g,z_d]' - [estState.oriEst + estState.driftEst; sqrt(estState.posEst*estState.posEst')]);
+%     x_m = x_p + K_k*vect;
+%     P_m = (eye(4) - K_k*H)*P_p;
+% end
+% if (isinf(z_c)==0)&&(isinf(z_g))&&(isinf(z_d))
+%     H = [1, 0, 0, 0];
+%     M = 1;
+%     R = sig_r;
+%     K_k = P_p*H'/(H*P_p*H' + M*R*M');
+%     vect = (z_c - estState.oriEst);
+%     x_m = x_p + vect*K_k;
+%     P_m = (eye(4) - K_k*H)*P_p;
+% end
+% if (isinf(z_c))&&(isinf(z_g)==0)&&(isinf(z_d))
+%     H = [1, 0, 0, 1];
+%     M = 1;
+%     R = sig_g;
+%     K_k = P_p*H'/(H*P_p*H' + M*R*M');
+%     vect = (z_g - estState.oriEst - estState.driftEst);
+%     x_m = x_p + vect*K_k;
+%     P_m = (eye(4) - K_k*H)*P_p;
+% end
+% if (isinf(z_c))&&(isinf(z_g))&&(isinf(z_d)==0)
+%     H = [0, estState.posEst(1)/(sqrt(estState.posEst*estState.posEst')), estState.posEst(2)/(sqrt(estState.posEst*estState.posEst')), 0];
+%     M = 1;
+%     R = sig_d;
+%     K_k = P_p*H'/(H*P_p*H' + M*R*M');
+%     vect = (z_d - sqrt(estState.posEst*estState.posEst'));
+%     x_m = x_p + vect*K_k;
+%     P_m = (eye(4) - K_k*H)*P_p;
+% end
+% if (isinf(z_c)==0)&&(isinf(z_g)==0)&&(isinf(z_d)==0)
+%     H = [1, 0, 0, 0; 1, 0, 0, 1; 0, estState.posEst(1)/(sqrt(estState.posEst*estState.posEst')), estState.posEst(2)/(sqrt(estState.posEst*estState.posEst')), 0];
+%     M = eye(3);
+%     R = diag([sig_r,sig_g,sig_d],0);
+%     K_k = P_p*H'/(H*P_p*H' + M*R*M');
+%     x_m = x_p + K_k*(sense' - [estState.oriEst; estState.oriEst + estState.driftEst; sqrt(estState.posEst*estState.posEst')]);
+%     P_m = (eye(4) - K_k*H)*P_p;
+% end
+
+H = [1, 0, 0, 0; 1, 0, 0, 1; 0, estState.posEst(1)/(sqrt(estState.posEst*estState.posEst')), estState.posEst(2)/(sqrt(estState.posEst*estState.posEst')), 0];
+M = eye(3);
+R = diag([sig_r,sig_g,sig_d],0);
+K_k = P_p*H'/(H*P_p*H' + M*R*M');
+if isinf(z_c)
+    H(1,:) = zeros(1,4);
+    z_c = estState.oriEst;
+end
+if isinf(z_g)
+    H(2,:) = zeros(1,4);
+    z_g = estState.oriEst + estState.driftEst;
+end
+if isinf(z_d)
+    H(3,:) = zeros(1,4);
+    z_d = sqrt(estState.posEst*estState.posEst');
+end
+
+z = [z_c; z_g; z_d];
+x_m = x_p + K_k*(z - [estState.oriEst; estState.oriEst + estState.driftEst; sqrt(estState.posEst*estState.posEst')]);
+P_m = (eye(4) - K_k*H)*P_p;
 
 % Replace the following:
-posEst = [0 0];
-oriEst = 0;
-driftEst = 0;
-posVar = [0 0];
-oriVar = 0;
-driftVar = 0;
+estState.posEst = [x_m(2,1),x_m(3,1)];
+estState.oriEst = x_m(1,1);
+estState.driftEst = x_m(4,1);
+estState.posVar = [P_m(2,2), P_m(3,3)];
+estState.oriVar = P_m(1,1);
+estState.driftVar = P_m(4,4);
+estState.P = P_m;
+posEst = estState.posEst;
+oriEst = estState.oriEst;
+driftEst = estState.driftEst;
+posVar = estState.posVar;
+oriVar = estState.oriVar;
+driftVar = estState.driftVar;
 
 end
