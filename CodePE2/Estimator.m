@@ -96,8 +96,8 @@ if (init)
     postParticles.y = [zeros(2,N/4) ones(2,N/4)*Ly ones(2,N/4)*Ly zeros(2,N/4)] ;
     % make sure robots init headings point into the room
     % TO DO: handle case where N/4 is not an integer.
-%     postParticles.h = [ pi/2+rand([2,N/4])*pi/2 pi+rand([2,N/4])*pi/2 pi*3/2+rand([2,N/4])*pi/2 rand([2,N/4])*pi/2 ] ;
-    postParticles.h = rand(2,N)*2*pi ; 
+    %     postParticles.h = [ pi/2+rand([2,N/4])*pi/2 pi+rand([2,N/4])*pi/2 pi*3/2+rand([2,N/4])*pi/2 rand([2,N/4])*pi/2 ] ;
+    postParticles.h = rand(2,N)*2*pi ;
     
     % and leave the function
     return;
@@ -140,7 +140,8 @@ x_p_update.y(2,:) = prevPostParticles.y(2,:) + velocity.B(2,:)*KC.ts ;
 
 % TO DO: how to make a pdf from a known distribution c*vj^2 ??
 % making f_vj a uniform distribution for now.
-vj_pdf = makedist('Uniform', 'lower', -1, 'upper', 1) ;
+% vj_pdf = makedist('Uniform', 'lower', -1, 'upper', 1) ;
+
 
 % check if we've hit a wall:
 hit.A.north = x_p_update.y(1,:) > Ly ;
@@ -156,16 +157,21 @@ hit.B.west = x_p_update.x(2,:) < 0 ;
 % same.
 x_p_update.h = prevPostParticles.h ;
 for p=1:N
-    if hit.A.north(1,p) || hit.A.south(1,p) || hit.A.east(1,p) || hit.A.west(1,p)
-        x_p_update.h(1,p) = pi - prevPostParticles.h(1,p) + rand()*pi/3-pi/6 ; % TO DO: use actual vj distribution
-%         disp('x,y A')
-%         x_p_update.x(1,p), x_p_update.y(1,p)
-    elseif hit.B.north(1,p) || hit.B.south(1,p) || hit.B.east(1,p) || hit.B.west(1,p)
-        x_p_update.h(2,p) = pi - prevPostParticles.h(2,p) + rand()*pi/3-pi/6  ; % TO DO: use actual vj distribution
-%         disp('x,y B')
-%         x_p_update.x(2,p), x_p_update.y(2,p)
+    if hit.A.north(1,p) || hit.A.south(1,p)
+        vj_error = heading_noise(prevPostParticles.h(1,p), 0) ;
+        x_p_update.h(1,p) = (2*pi - prevPostParticles.h(1,p))*(1 + vj_error) ;
+    elseif hit.A.east(1,p) || hit.A.west(1,p)
+        vj_error = heading_noise(prevPostParticles.h(1,p), pi/2) ;
+        x_p_update.h(1,p) = (pi - prevPostParticles.h(1,p))*(1 + vj_error) ;
+    elseif hit.B.north(1,p) || hit.B.south(1,p)
+        vj_error = heading_noise(prevPostParticles.h(2,p), 0) ;
+        x_p_update.h(2,p) = (2*pi - prevPostParticles.h(2,p))*(1 + vj_error)  ;
+    elseif hit.B.east(1,p) || hit.B.west(1,p)
+        vj_error = heading_noise(prevPostParticles.h(2,p), pi/2) ;
+        x_p_update.h(2,p) = (pi - prevPostParticles.h(2,p))*(1 + vj_error) ;
     end
 end
+
 
 %% Generate PDF of Sensor Noise and get N samples:
 
@@ -288,5 +294,34 @@ for j=1:N
     %% Roughening
     
     
+    
+    %% Nested functions
+    
+    function vj_error = heading_noise(incident_angle, wall_angle)
+    % function determines the refelcted ideal angle and the error
+    % calculate heading noise.
+    c = 3/2*KC.vbar^3 ; % first find c by integrating over [-vbar, vbar]:
+    max_f_vj = c*KC.vbar^2 ; % calculate max f(vj) = c*vbar^2
+    f_vj = rand()*max_f_vj ; % choose a random f(vj)
+    vj_pos = sqrt(f_vj*c) ; % find the (positive only!) corresponding value of vj
+    vj_neg = -vj_pos ;
+    vj_pos_neg = [vj_pos vj_neg ] ;
+    
+    assign_pos_or_neg = randi(2) ;  % make vj randomly positive or negative
+    vj = vj_pos_neg(assign_pos_or_neg) ;
+    
+    % find angle alpha (which is the angle between the wall and the incident
+    % angle). heading error = alpha*vj
+    alpha = incident_angle ;
+    while (alpha - wall_angle) > pi/2
+        alpha = alpha - pi/2 ;
+    end
+    
+    vj_error = alpha*vj ;
+    
+    %     end % end function vj_error % TO DO : update matlab, uncomment this
+    %     end statement
+    
+    
 end % end estimator
-
+    
