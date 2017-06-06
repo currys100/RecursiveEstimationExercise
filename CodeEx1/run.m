@@ -45,8 +45,8 @@ function trackErrorNorm=run(simConst,estConst,doplot,seed)
 % [05.05.17, LH]    2017 version
 
 % clear command window, close figures
-clc;
-close all;
+%clc;
+%close all;
 
 if nargin==0
    % Define the simulation constants that are used in simulation, but not 
@@ -70,6 +70,7 @@ end
 % Set the random number generator state.
 % Uncomment to make results reproducable. This setting was used to generate
 % the plot in the problem description.
+
 if seed ~= 0
     rand('seed',seed);
     randn('seed',seed);
@@ -81,18 +82,25 @@ end
 % measurements.
 [tm, loc, drift, input, sense] = Simulator( simConst );
 
-
 %% Run the Estimator
 N=simConst.N;
 
 % Initialize the estimator.  
-estState = [];
 posEst = zeros(N,2);
 oriEst = zeros(N,1);
 driftEst = zeros(N,1);
 posVar = zeros(N,2);
 oriVar = zeros(N,1);
 driftVar = zeros(N,1);
+
+estState.posEst = zeros(1,2);
+estState.oriEst = zeros(1,1);
+estState.driftEst = zeros(1,1);
+estState.posVar = zeros(1,2);
+estState.driftVar = zeros(1,1);
+estState.oriVar = zeros(1,1);
+estState.P = zeros(4,4);
+
 [posEst(1,:),oriEst(1),driftEst(1),posVar(1,:),oriVar(1),driftVar(1),estState] = ...
     Estimator(estState,zeros(1,2),zeros(1,3),0,estConst);
 
@@ -103,17 +111,33 @@ for n = 2:N
 end
 
 
-
 %% The results
 % Plots of the results.
 
 % Calculate the total tracking error.
 % Replace the following:
-trackErrorNorm = 0;
+error = 0;
+for k = 1:N
+    error = error + (loc(k,1:2) - posEst(k,:))*(loc(k,1:2) - posEst(k,:))';
+end
+trackErrorNorm = sqrt(error/N);
 
 if doplot
-    % Add your plots here to debug the estimator and verify your
-    % implementation.
+    hold on
+    figure(1)
+    plot(posEst(:,1),'g')
+    plot(loc(:,1))
+    legend('Est','Loc')
+    
+    figure(2); hold on;
+    plot(posEst(:,2),'g')
+    plot(loc(:,2))
+    legend('Est','Loc')
+    
+    figure(3); hold on;
+    plot(oriEst,'r')
+    plot(loc(:,3))
+    legend('Est','Ori')
 end
     
 return;
