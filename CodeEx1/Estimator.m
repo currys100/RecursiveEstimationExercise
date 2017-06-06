@@ -61,6 +61,26 @@ function [posEst,oriEst,driftEst, posVar,oriVar,driftVar,estState] = Estimator(e
 % [14.04.16, MM]    2016 version
 % [05.05.17, LH]    2017 version
 
+function vec = convertMatrixToVec( mat )
+%CONVERTMATRIXTOCOL Summary of this function goes here
+%   Detailed explanation goes here
+
+vec(1:4,1) = mat(1:4,1);
+vec(5:8,1) = mat(1:4,2);
+vec(9:12,1) = mat(1:4,3);
+vec(13:16,1) = mat(1:4,4);
+end
+
+function mat = convertVecToMatrix( vec )
+%CONVERTCOLTOMATRIX Summary of this function goes here
+%   Detailed explanation goes here
+
+mat(1:4,1) = vec(1:4,1);
+mat(1:4,2) = vec(5:8,1);
+mat(1:4,3) = vec(9:12,1);
+mat(1:4,4) = vec(13:16,1);
+end
+
 
 %% Mode 1: Initialization
 if (tm == 0)
