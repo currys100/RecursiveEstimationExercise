@@ -1,4 +1,4 @@
-function [postParticles, redist_count] = Estimator(prevPostParticles, sens, act, init, N, K)
+function [postParticles] = Estimator(prevPostParticles, sens, act, init)
 % [postParticles] = Estimator(prevPostParticles, sens, act, init)
 %
 % The estimator function. The function will be called in two different
@@ -65,15 +65,10 @@ function [postParticles, redist_count] = Estimator(prevPostParticles, sens, act,
 % michaemu@ethz.ch
 
 % Check if init argument was passed to estimator:
-% if(nargin < 4) % TO DO change back to 4! 
-%     % if not, set to default value:
-%     init = 0;
-% end
-
-% if(nargin < 5) % TO DO change back to 4! 
-%     % if not, set to default value:
-%     init = 0;
-% end
+if(nargin < 4) 
+    % if not, set to default value:
+    init = 0;
+end
 
 %% room params
 % Room is size Lx2L, where L is a known constant set by KC.L
@@ -82,9 +77,8 @@ Ly = KC.L ;
 Lx = 2*Ly ;
 
 %% Mode 1: Initialization
-% TO DO: how to tune the number of particles?
 % Set number of particles:
-% N = 100; % obviously, you will need more particles than 10.
+N = 900; % obviously, you will need more particles than 10.
 
 if (init)
     % Do the initialization of your estimator here!
@@ -104,7 +98,7 @@ if (init)
     % TO DO: make sure robots init headings point into the room
     %     postParticles.h = [pi/2+rand([2,ceil(N/2)])*pi/2 pi+rand([2,N/4])*pi/2 pi*3/2+rand([2,N/4])*pi/2 rand([2,N/4])*pi/2 ] ;
     postParticles.h = rand(2,N)*2*pi ;
-    redist_count = NaN ; 
+    redist_count = NaN ;
     % and leave the function
     return;
 end % end init
@@ -142,11 +136,6 @@ x_p_update.y(2,:) = prevPostParticles.y(2,:) + velocity.B(2,:)*KC.ts ;
 
 %% prior update heading
 % if we hit a wall, the new angle is  the ideal reflected angle + noise
-
-% TO DO: how to make a pdf from a known distribution c*vj^2 ??
-% making f_vj a uniform distribution for now.
-% vj_pdf = makedist('Uniform', 'lower', -1, 'upper', 1) ;
-
 
 % check if we've hit a wall:
 hit.A.north = x_p_update.y(1,:) > Ly ;
@@ -207,8 +196,6 @@ upper = wbar ;
 z_noise_pdf = makedist('Triangular','a',lower,'b',peak,'c',upper) ;
 
 %% determine weights of particles
-% TO DO: make this a function. only execute if there are any sensor
-% measurements.
 
 % calculate distance from sensor to robot, based on x_p_update estimate.
 % distance is a 2xN matrix containing distances to each sensor
@@ -298,44 +285,35 @@ tests_failed.B = 1;
 resample_set_count.A = sum(z_weights.A > 0) ;
 resample_set_count.B = sum(z_weights.B > 0) ;
 
-sums_z_weights.A = cumsum(z_weights.A) ; 
-sums_z_weights.B = cumsum(z_weights.B) ; 
+sums_z_weights.A = cumsum(z_weights.A) ;
+sums_z_weights.B = cumsum(z_weights.B) ;
 
 for j=1:N
     % choose a random r between 0 and 1
     r = rand() ;
     
-    p_ind.A = find(sums_z_weights.A > r, 1) ; 
+    p_ind.A = find(sums_z_weights.A > r, 1) ;
     p_ind.B = find(sums_z_weights.B > r, 1) ;
     
-%     % determine which particle falls into the r bin by satisfying 2 tests
-%     for p=1:N
-%         
-%         test1A = sum(z_weights.A(1:p)) >= r ;
-%  
-% %         test2A = sum(z_weights.A(1:p-1)) < r ;
-%         test1B = sum(z_weights.B(1:p)) >= r ;
-%         test2B = sum(z_weights.B(1:p-1)) < r ;
-%         
-        if ~isempty(p_ind.A)  
-            postParticles.x(1,j) = x_p_update.x(1,p_ind.A)  ;
-            postParticles.y(1,j) = x_p_update.y(1,p_ind.A)  ;
-            postParticles.h(1,j) = x_p_update.h(1,p_ind.A)  ;
-            tests_failed.A = 0 ;
-        end % end if
-%         
-        if ~isempty(p_ind.B) 
-            postParticles.x(2,j) = x_p_update.x(2,p_ind.B) ;
-            postParticles.y(2,j) = x_p_update.y(2,p_ind.B) ;
-            postParticles.h(2,j) = x_p_update.h(2,p_ind.B) ;
-            tests_failed.B = 0 ;
-        end % end if
-%     end % end p=1:N
+    if ~isempty(p_ind.A)
+        postParticles.x(1,j) = x_p_update.x(1,p_ind.A)  ;
+        postParticles.y(1,j) = x_p_update.y(1,p_ind.A)  ;
+        postParticles.h(1,j) = x_p_update.h(1,p_ind.A)  ;
+        tests_failed.A = 0 ;
+    end % end if
+    %
+    if ~isempty(p_ind.B)
+        postParticles.x(2,j) = x_p_update.x(2,p_ind.B) ;
+        postParticles.y(2,j) = x_p_update.y(2,p_ind.B) ;
+        postParticles.h(2,j) = x_p_update.h(2,p_ind.B) ;
+        tests_failed.B = 0 ;
+    end % end if
+    %     end % end p=1:N
 end % end for j=1:N
 
 % K = 0.05 ; % K value if we do NOT redistribute particles
 
-redist_count = 0 ; 
+redist_count = 0 ;
 
 % if tests fail for all particles, redistribute particles
 if tests_failed.A
@@ -343,20 +321,20 @@ if tests_failed.A
     postParticles.x(1,:) = redist_particles.x ;
     postParticles.y(1,:) = redist_particles.y ;
     postParticles.h(1,:) = rand(1, N)*2*pi ;
-    redist_count = redist_count + 1 ; 
-%     K = 3*K ; 
+    redist_count = redist_count + 1 ;
+    %     K = 3*K ;
 end
 if tests_failed.B
     redist_particles = redistribute_particles('robotB', sens, N, Lx, Ly) ;
     postParticles.x(2,:) = redist_particles.x ;
     postParticles.y(2,:) = redist_particles.y ;
     postParticles.h(2,:) = rand(1, N)*2*pi ;
-    redist_count = redist_count + 1 ; 
-%     K = 3*K ; 
+    redist_count = redist_count + 1 ;
+    %     K = 3*K ;
 end
 
-postParticles = roughen(postParticles, N, K, resample_set_count) ; 
- 
+postParticles = roughen(postParticles, N, resample_set_count) ;
+
 end % end estimator
 
 
@@ -366,25 +344,25 @@ end % end estimator
 
 % define signma_i = K*E*N^(-1/d) = standard dev of the noise to add to the
 % particle.
-function roughened_particles = roughen(particles, N, K, resample_size)
-% K = 0.05 ; % K = tuning param << 1
+function roughened_particles = roughen(particles, N, resample_size)
+K = 0.05 ; % K = tuning param << 1
 % K = K*(1+ (N-resample_size.A)/N ) ; % scale K according to resample set
 dimension = 3 ; % dimensions of state vector (x, y, h)
 
-% roughen x,y coordinates: 
+% roughen x,y coordinates:
 Ei.A.x = max(particles.x(1,:)) - min(particles.x(1,:)) ;
 Ei.A.y = max(particles.y(1,:)) - min(particles.y(1,:)) ;
 Ei_total.A = sqrt(Ei.A.x^2 + Ei.A.y^2) ;
-% Ei_total.A = 1 ; 
+% Ei_total.A = 1 ;
 sigma_i.A = K*Ei_total.A*N^(-1/dimension) ; % dimension = 2 for x,y coordinates
 roughening_pdf.A = makedist('Normal', 'mu', 0, 'sigma' , sigma_i.A ) ;
 roughening_noise.A = random(roughening_pdf.A, 1, N) ;
 roughened_particles.x(1,:) = particles.x(1,:) + roughening_noise.A ;
 roughened_particles.y(1,:) = particles.y(1,:) + roughening_noise.A ;
 sprintf('sigmaAxy = %d', sigma_i.A) ;
-% roughen heading: 
+% roughen heading:
 Ei.A.h = max(particles.h(1,:)) - min(particles.h(1,:)) ;
-sigma_i.Ah = K*Ei.A.h*N^(-1/dimension) ; 
+sigma_i.Ah = K*Ei.A.h*N^(-1/dimension) ;
 roughening_pdf.Ah = makedist('Normal', 'mu', 0, 'sigma' , sigma_i.Ah ) ;
 roughening_noise.Ah = random(roughening_pdf.Ah, 1, N) ;
 roughened_particles.h(1,:) = particles.h(1,:) + roughening_noise.Ah ;
@@ -392,7 +370,7 @@ sprintf('sigmaAh = %d', sigma_i.Ah) ;
 
 if size(particles.x,1)==2
     K = K*(1+ (N-resample_size.B)/N ) ; % scale K according to resample set
-
+    
     Ei.B.x = max(particles.x(2,:)) - min(particles.x(2,:)) ;
     Ei.B.y = max(particles.y(2,:)) - min(particles.y(2,:)) ;
     Ei.B.h = max(particles.h(2,:)) - min(particles.h(2,:)) ;
@@ -477,7 +455,7 @@ if robot == 'robotB'
     elseif ~isinf(sens(4))
         new_particles.h = rand(1,N)*2*pi ;
         theta_s4 = rand(1,N)*pi/2 ;
-        new_particles.x = sens(4)*cos(theta_s4) ; 
+        new_particles.x = sens(4)*cos(theta_s4) ;
         new_particles.y = sens(4)*sin(theta_s4) ;
     elseif ~isinf(sens(3))
         new_particles.h = rand(1,N)*2*pi ;
