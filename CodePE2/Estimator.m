@@ -298,38 +298,44 @@ tests_failed.B = 1;
 resample_set_count.A = sum(z_weights.A > 0) ;
 resample_set_count.B = sum(z_weights.B > 0) ;
 
+sums_z_weights.A = cumsum(z_weights.A) ; 
+sums_z_weights.B = cumsum(z_weights.B) ; 
+
 for j=1:N
     % choose a random r between 0 and 1
     r = rand() ;
     
-    % determine which particle falls into the r bin by satisfying 2 tests
-    for p=1:N
-        
-        test1A = sum(z_weights.A(1:p)) >= r ;
-        test2A = sum(z_weights.A(1:p-1)) < r ;
-        test1B = sum(z_weights.B(1:p)) >= r ;
-        test2B = sum(z_weights.B(1:p-1)) < r ;
-        
-        if test1A && test2A
-            postParticles.x(1,j) = x_p_update.x(1,p)  ;
-            postParticles.y(1,j) = x_p_update.y(1,p)  ;
-            postParticles.h(1,j) = x_p_update.h(1,p)  ;
+    p_ind.A = find(sums_z_weights.A > r, 1) ; 
+    p_ind.B = find(sums_z_weights.B > r, 1) ;
+    
+%     % determine which particle falls into the r bin by satisfying 2 tests
+%     for p=1:N
+%         
+%         test1A = sum(z_weights.A(1:p)) >= r ;
+%  
+% %         test2A = sum(z_weights.A(1:p-1)) < r ;
+%         test1B = sum(z_weights.B(1:p)) >= r ;
+%         test2B = sum(z_weights.B(1:p-1)) < r ;
+%         
+        if ~isempty(p_ind.A)  
+            postParticles.x(1,j) = x_p_update.x(1,p_ind.A)  ;
+            postParticles.y(1,j) = x_p_update.y(1,p_ind.A)  ;
+            postParticles.h(1,j) = x_p_update.h(1,p_ind.A)  ;
             tests_failed.A = 0 ;
         end % end if
-        
-        if test1B && test2B
-            postParticles.x(2,j) = x_p_update.x(2,p) ;
-            postParticles.y(2,j) = x_p_update.y(2,p) ;
-            postParticles.h(2,j) = x_p_update.h(2,p) ;
+%         
+        if ~isempty(p_ind.B) 
+            postParticles.x(2,j) = x_p_update.x(2,p_ind.B) ;
+            postParticles.y(2,j) = x_p_update.y(2,p_ind.B) ;
+            postParticles.h(2,j) = x_p_update.h(2,p_ind.B) ;
             tests_failed.B = 0 ;
         end % end if
-    end % end p=1:N
+%     end % end p=1:N
 end % end for j=1:N
 
 % K = 0.05 ; % K value if we do NOT redistribute particles
 
 redist_count = 0 ; 
-
 
 % if tests fail for all particles, redistribute particles
 if tests_failed.A
@@ -362,7 +368,7 @@ end % end estimator
 % particle.
 function roughened_particles = roughen(particles, N, K, resample_size)
 % K = 0.05 ; % K = tuning param << 1
-K = K*(1+ (N-resample_size.A)/N ) ; % scale K according to resample set
+% K = K*(1+ (N-resample_size.A)/N ) ; % scale K according to resample set
 dimension = 3 ; % dimensions of state vector (x, y, h)
 
 % roughen x,y coordinates: 
@@ -370,18 +376,19 @@ Ei.A.x = max(particles.x(1,:)) - min(particles.x(1,:)) ;
 Ei.A.y = max(particles.y(1,:)) - min(particles.y(1,:)) ;
 Ei_total.A = sqrt(Ei.A.x^2 + Ei.A.y^2) ;
 % Ei_total.A = 1 ; 
-sigma_i.A = K*Ei_total.A*N^(-1/2) ; % dimension = 2 for x,y coordinates
+sigma_i.A = K*Ei_total.A*N^(-1/dimension) ; % dimension = 2 for x,y coordinates
 roughening_pdf.A = makedist('Normal', 'mu', 0, 'sigma' , sigma_i.A ) ;
 roughening_noise.A = random(roughening_pdf.A, 1, N) ;
 roughened_particles.x(1,:) = particles.x(1,:) + roughening_noise.A ;
 roughened_particles.y(1,:) = particles.y(1,:) + roughening_noise.A ;
-
+sprintf('sigmaAxy = %d', sigma_i.A) ;
 % roughen heading: 
 Ei.A.h = max(particles.h(1,:)) - min(particles.h(1,:)) ;
-sigma_i.Ah = K*Ei.A.h*N^(-1) ; 
+sigma_i.Ah = K*Ei.A.h*N^(-1/dimension) ; 
 roughening_pdf.Ah = makedist('Normal', 'mu', 0, 'sigma' , sigma_i.Ah ) ;
 roughening_noise.Ah = random(roughening_pdf.Ah, 1, N) ;
 roughened_particles.h(1,:) = particles.h(1,:) + roughening_noise.Ah ;
+sprintf('sigmaAh = %d', sigma_i.Ah) ;
 
 if size(particles.x,1)==2
     K = K*(1+ (N-resample_size.B)/N ) ; % scale K according to resample set
@@ -389,14 +396,21 @@ if size(particles.x,1)==2
     Ei.B.x = max(particles.x(2,:)) - min(particles.x(2,:)) ;
     Ei.B.y = max(particles.y(2,:)) - min(particles.y(2,:)) ;
     Ei.B.h = max(particles.h(2,:)) - min(particles.h(2,:)) ;
-    Ei_total.B = sqrt(Ei.B.x^2 + Ei.B.y^2 + Ei.B.h^2) ;
-%     Ei_total.B = 1 ;
+    Ei_total.B = sqrt(Ei.B.x^2 + Ei.B.y^2) ;
     sigma_i.B = K*Ei_total.B*N^(-1/dimension) ;
     roughening_pdf.B = makedist('Normal', 'sigma' , sigma_i.B ) ;
     roughening_noise.B = random(roughening_pdf.B, 1, N) ;
     roughened_particles.x(2,:) = particles.x(2,:) + roughening_noise.B ;
     roughened_particles.y(2,:) = particles.y(2,:) + roughening_noise.B ;
-    roughened_particles.h(2,:) = particles.h(2,:) + roughening_noise.B ;
+    sprintf('sigmaBxy = %d', sigma_i.B) ;
+    
+    % roughen heading:
+    Ei.B.h = max(particles.h(2,:)) - min(particles.h(2,:)) ;
+    sigma_i.Bh = K*Ei.B.h*N^(-1/dimension) ;
+    sprintf('sigmaBh = %d', sigma_i.Bh)  ;
+    roughening_pdf.Bh = makedist('Normal', 'mu', 0, 'sigma' , sigma_i.Bh ) ;
+    roughening_noise.Bh = random(roughening_pdf.Bh, 1, N) ;
+    roughened_particles.h(2,:) = particles.h(2,:) + roughening_noise.Bh ;
 end % end if
 end % end function roughen
 
