@@ -1,4 +1,4 @@
-function [postParticles] = Estimator(prevPostParticles, sens, act, init)
+function [postParticles, redist_count] = Estimator(prevPostParticles, sens, act, init, N, K)
 % [postParticles] = Estimator(prevPostParticles, sens, act, init)
 %
 % The estimator function. The function will be called in two different
@@ -65,10 +65,15 @@ function [postParticles] = Estimator(prevPostParticles, sens, act, init)
 % michaemu@ethz.ch
 
 % Check if init argument was passed to estimator:
-if(nargin < 4)
-    % if not, set to default value:
-    init = 0;
-end
+% if(nargin < 4) % TO DO change back to 4! 
+%     % if not, set to default value:
+%     init = 0;
+% end
+
+% if(nargin < 5) % TO DO change back to 4! 
+%     % if not, set to default value:
+%     init = 0;
+% end
 
 %% room params
 % Room is size Lx2L, where L is a known constant set by KC.L
@@ -79,7 +84,8 @@ Lx = 2*Ly ;
 %% Mode 1: Initialization
 % TO DO: how to tune the number of particles?
 % Set number of particles:
-N = 500; % obviously, you will need more particles than 10.
+% N = 100; % obviously, you will need more particles than 10.
+
 if (init)
     % Do the initialization of your estimator here!
     % These particles are the posterior particles at discrete time k = 0
@@ -98,7 +104,7 @@ if (init)
     % TO DO: make sure robots init headings point into the room
     %     postParticles.h = [pi/2+rand([2,ceil(N/2)])*pi/2 pi+rand([2,N/4])*pi/2 pi*3/2+rand([2,N/4])*pi/2 rand([2,N/4])*pi/2 ] ;
     postParticles.h = rand(2,N)*2*pi ;
-    
+    redist_count = NaN ; 
     % and leave the function
     return;
 end % end init
@@ -274,21 +280,6 @@ end
 z_weights.A = z_weights.A / sum(z_weights.A) ;
 z_weights.B = z_weights.B / sum(z_weights.B) ;
 
-% if z_weights.A TO DO : handle case of lost particles.
-% if z_weights.A == 1/N
-%     redist_particles = redistribute_particles('robotA', sens, N, Lx, Ly) ;
-%     x_p_update.x(1,:) = redist_particles.x ;
-%     x_p_update.y(1,:) = redist_particles.y ;
-%     x_p_update.h(1,:) = redist_particles.h ;
-% end
-
-% if z_weights.B == 1/N
-%     redist_particles = redistribute_particles('robotB', sens, N, Lx, Ly) ;
-%     x_p_update.x(2,:) = redist_particles.x ;
-%     x_p_update.y(2,:) = redist_particles.y ;
-%     x_p_update.h(2,:) = redist_particles.h ;
-% end
-
 
 %% Resample: find the particle corresponding to the r bin
 
@@ -302,6 +293,10 @@ postParticles.h = zeros(2,N);
 % if neither test passes for any particle, then redistribute the particles.
 tests_failed.A = 1;
 tests_failed.B = 1;
+
+% determine number of particles we're resampling from:
+resample_set_count.A = sum(z_weights.A > 0) ;
+resample_set_count.B = sum(z_weights.B > 0) ;
 
 for j=1:N
     % choose a random r between 0 and 1
@@ -331,22 +326,31 @@ for j=1:N
     end % end p=1:N
 end % end for j=1:N
 
+% K = 0.05 ; % K value if we do NOT redistribute particles
+
+redist_count = 0 ; 
+
+
 % if tests fail for all particles, redistribute particles
 if tests_failed.A
     redist_particles = redistribute_particles('robotA', sens, N, Lx, Ly) ;
     postParticles.x(1,:) = redist_particles.x ;
     postParticles.y(1,:) = redist_particles.y ;
-    postParticles.h(1,:) = redist_particles.h ;
+    postParticles.h(1,:) = rand(1, N)*2*pi ;
+    redist_count = redist_count + 1 ; 
+%     K = 3*K ; 
 end
 if tests_failed.B
     redist_particles = redistribute_particles('robotB', sens, N, Lx, Ly) ;
     postParticles.x(2,:) = redist_particles.x ;
     postParticles.y(2,:) = redist_particles.y ;
-    postParticles.h(2,:) = redist_particles.h ;
+    postParticles.h(2,:) = rand(1, N)*2*pi ;
+    redist_count = redist_count + 1 ; 
+%     K = 3*K ; 
 end
 
-postParticles = roughen(postParticles, N) ; 
-
+postParticles = roughen(postParticles, N, K, resample_set_count) ; 
+ 
 end % end estimator
 
 
@@ -356,25 +360,37 @@ end % end estimator
 
 % define signma_i = K*E*N^(-1/d) = standard dev of the noise to add to the
 % particle.
-function roughened_particles = roughen(particles, N)
-K = 0.05 ; % K = tuning param << 1
+function roughened_particles = roughen(particles, N, K, resample_size)
+% K = 0.05 ; % K = tuning param << 1
+K = K*(1+ (N-resample_size.A)/N ) ; % scale K according to resample set
 dimension = 3 ; % dimensions of state vector (x, y, h)
+
+% roughen x,y coordinates: 
 Ei.A.x = max(particles.x(1,:)) - min(particles.x(1,:)) ;
 Ei.A.y = max(particles.y(1,:)) - min(particles.y(1,:)) ;
-Ei.A.h = max(particles.h(1,:)) - min(particles.h(1,:)) ;
-Ei_total.A = sqrt(Ei.A.x^2 + Ei.A.y^2 + Ei.A.h^2) ;
-sigma_i.A = K*Ei_total.A*N^(-1/dimension) ;
-roughening_pdf.A = makedist('Normal', 'sigma' , sigma_i.A ) ;
+Ei_total.A = sqrt(Ei.A.x^2 + Ei.A.y^2) ;
+% Ei_total.A = 1 ; 
+sigma_i.A = K*Ei_total.A*N^(-1/2) ; % dimension = 2 for x,y coordinates
+roughening_pdf.A = makedist('Normal', 'mu', 0, 'sigma' , sigma_i.A ) ;
 roughening_noise.A = random(roughening_pdf.A, 1, N) ;
 roughened_particles.x(1,:) = particles.x(1,:) + roughening_noise.A ;
 roughened_particles.y(1,:) = particles.y(1,:) + roughening_noise.A ;
-roughened_particles.h(1,:) = particles.h(1,:) + roughening_noise.A ;
+
+% roughen heading: 
+Ei.A.h = max(particles.h(1,:)) - min(particles.h(1,:)) ;
+sigma_i.Ah = K*Ei.A.h*N^(-1) ; 
+roughening_pdf.Ah = makedist('Normal', 'mu', 0, 'sigma' , sigma_i.Ah ) ;
+roughening_noise.Ah = random(roughening_pdf.Ah, 1, N) ;
+roughened_particles.h(1,:) = particles.h(1,:) + roughening_noise.Ah ;
 
 if size(particles.x,1)==2
+    K = K*(1+ (N-resample_size.B)/N ) ; % scale K according to resample set
+
     Ei.B.x = max(particles.x(2,:)) - min(particles.x(2,:)) ;
     Ei.B.y = max(particles.y(2,:)) - min(particles.y(2,:)) ;
     Ei.B.h = max(particles.h(2,:)) - min(particles.h(2,:)) ;
     Ei_total.B = sqrt(Ei.B.x^2 + Ei.B.y^2 + Ei.B.h^2) ;
+%     Ei_total.B = 1 ;
     sigma_i.B = K*Ei_total.B*N^(-1/dimension) ;
     roughening_pdf.B = makedist('Normal', 'sigma' , sigma_i.B ) ;
     roughening_noise.B = random(roughening_pdf.B, 1, N) ;
@@ -438,32 +454,29 @@ if robot == 'robotA'
 end
 
 if robot == 'robotB'
+    if ~isinf(sens(3)) && ~isinf(sens(4))
+        % redistribute sbar% of particles for robot A;
+        new_particles.h = rand(1,N)*2*pi ;
+        theta_s3_s4 =  [rand(1,floor(N/2))*pi/2 rand(1,floor(N/2))*pi/2 + 3*pi/2 ] ;
+        new_particles.x = [sens(4)*cos(theta_s3_s4(1:floor(N/2))) sens(3)*cos(theta_s3_s4(floor(N/2+1):end)) ]; % cos(theta) < 0, so add this to Lx
+        new_particles.y = [sens(4)*sin(theta_s3_s4(1:floor(N/2))) Ly+sens(3)*sin(theta_s3_s4(floor(N/2)+1:end))] ;
+    elseif ~isinf(sens(4))
+        new_particles.h = rand(1,N)*2*pi ;
+        theta_s4 = rand(1,N)*pi/2 ;
+        new_particles.x = sens(4)*cos(theta_s4) ; 
+        new_particles.y = sens(4)*sin(theta_s4) ;
+    elseif ~isinf(sens(3))
+        new_particles.h = rand(1,N)*2*pi ;
+        theta_s3 = rand(1,N)*pi/2 + 3*pi/2;
+        new_particles.x = sens(3)*cos(theta_s3) ;
+        new_particles.y = Ly+sens(3)*sin(theta_s3) ;
+    else
         new_particles.h = rand(1,N)*2*pi ;
         new_particles.x = rand(1,N)*Lx;
         new_particles.y = rand(1,N)*Ly ;
-    
-%         if ~isinf(sens(3)) && ~isinf(sens(4))
-%             redistribute sbar% of particles for robot A;
-%             new_particles.h = rand(1,N)*2*pi ;
-%             theta_s1_s2 =  [rand(1,floor(N/2))*pi/2 + pi/2 rand(1,floor(N/2))*pi/2 + pi ] ;
-%             new_particles.x = [Lx+sens(1)*cos(theta_s1_s2(1:floor(N/2))) Lx+sens(2)*cos(theta_s1_s2(floor(N/2+1):end)) ]; % cos(theta) < 0, so add this to Lx
-%             new_particles.y = [sens(1)*sin(theta_s1_s2(1:floor(N/2))) Ly+sens(2)*sin(theta_s1_s2(floor(N/2)+1:end))] ;
-%         elseif ~isinf(sens(1))
-%             new_particles.h = rand(1,N)*2*pi ;
-%             theta_s1 = rand(1,N)*pi/2 + pi/2 ;
-%             new_particles.x = Lx + sens(1)*cos(theta_s1) ; % cos(theta) < 0, so add this to Lx
-%             new_particles.y = sens(1)*sin(theta_s1) ;
-%         elseif ~isinf(sens(2))
-%             new_particles.h = rand(1,N)*2*pi ;
-%             theta_s2 = rand(1,N)*pi/2 + pi ;
-%             new_particles.x = Lx + sens(2)*cos(theta_s2) ;
-%             new_particles.y = Ly+sens(2)*sin(theta_s2) ;
-%         else
-%             new_particles.h = rand(1,N)*2*pi ;
-%             new_particles.x = rand(1,N)*Lx;
-%             new_particles.y = rand(1,N)*Ly ;
-%         end
+    end
 end
+
 
 end
 
